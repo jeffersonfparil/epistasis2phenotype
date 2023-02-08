@@ -537,19 +537,49 @@ function EXPORT_SIMULATED_DATA(vec_chr::Vector{String}, vec_pos::Vector{Int64}, 
 end
 
 ### RESULT: a simple linear model (e.g. OLS) can give us decent prediction accuracies even when the underlying model is purely epistasis
-n=5; m=100_000; l=135_000_000; k=5; ϵ=Int(1e+15); a=2; vec_chr_lengths=[0]; vec_chr_names=[""]; dist_noLD=500_000; o=100; t=10; nQTL=5; heritability=0.9; LD_chr=""; LD_n_pairs=10_000
-epistasis = true
-# epistasis = false
-@time vec_chr, vec_pos, X, y, b = SIMULATE(n, m, l, k, ϵ, a, vec_chr_lengths, vec_chr_names, dist_noLD, o, t, nQTL, heritability, LD_chr, LD_n_pairs, epistasis)
+n=5; m=100_000; l=135_000_000; k=5; ϵ=Int(1e+15); a=2; vec_chr_lengths=[0]; vec_chr_names=[""]; dist_noLD=500_000; o=100; t=10; nQTL=5;
+heritability=0.5; LD_chr=""; LD_n_pairs=10_000
+nreps = 10
+nfolds = Int(floor(o/10))-1
 
-idx = sample(collect(1:o), o, replace=false)
-idx_train = idx[1:90]
-idx_valid = idx[91:100]
-β̂ = X[idx_train,:]' * pinv(X[idx_train,:] * X[idx_train,:]') * y[idx_train];
-y_valid = X[idx_valid,:] * β̂
-rmse = sqrt(mean((y_valid - y[idx_valid]).^2)) / maximum(y)
-corr = cor(y_valid, y[idx_valid])
-UnicodePlots.scatterplot(Float64.(y_valid), Float64.(y[idx_valid]))
+vec_epistasis = []
+vec_rep = []
+vec_fold = []
+vec_rmse = []
+vec_corr = []
+vec_plot = []
+
+p = ProgressMeter.Progress(2*nreps*nfolds, dt=0.5,
+             barglyphs=BarGlyphs('|','█', ['▁' ,'▂' ,'▃' ,'▄' ,'▅' ,'▆', '▇'],' ','|',),
+             barlen=10); counter = 0
+for epistasis in [true, false]
+    for rep in 1:nreps
+        @time vec_chr, vec_pos, X, y, b = SIMULATE(n, m, l, k, ϵ, a, vec_chr_lengths, vec_chr_names, dist_noLD, o, t, nQTL, heritability, LD_chr, LD_n_pairs, epistasis)
+        y = (y .- minimum(y)) ./ (maximum(y) - minimum(y))
+        idx = sample(collect(1:o), o, replace=false)
+        for fold in 0:nfolds
+            idx_valid = idx[((10*fold)+1):(10*(fold+1))]
+            idx_train = [!(x ∈ idx_valid) for x in idx]
+            β̂ = X[idx_train,:]' * pinv(X[idx_train,:] * X[idx_train,:]') * y[idx_train];
+            y_valid = X[idx_valid,:] * β̂
+            rmse = sqrt(mean((y_valid - y[idx_valid]).^2)) / maximum(y)
+            corr = cor(y_valid, y[idx_valid])
+            plot = UnicodePlots.scatterplot(Float64.(y_valid), Float64.(y[idx_valid]))
+            push!(vec_epistasis, epistasis)
+            push!(vec_rep, rep)
+            push!(vec_fold, fold)
+            push!(vec_rmse, rmse)
+            push!(vec_corr, corr)
+            push!(vec_plot, plot)
+            ProgressMeter.update!(p, counter); counter += 1
+        end
+    end
+end
+
+mean(vec_corr[Bool.(vec_epistasis)])
+mean(vec_corr[.!Bool.(vec_epistasis)])
+mean(vec_rmse[Bool.(vec_epistasis)])
+mean(vec_rmse[.!Bool.(vec_epistasis)])
 
 ### NEXT: Can we do better by capturing the epistatic/interaction effects, i.e. model epistasis and fohgedabouh additive effects
 
