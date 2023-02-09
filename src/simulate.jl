@@ -582,4 +582,73 @@ mean(vec_rmse[Bool.(vec_epistasis)])
 mean(vec_rmse[.!Bool.(vec_epistasis)])
 
 ### NEXT: Can we do better by capturing the epistatic/interaction effects, i.e. model epistasis and fohgedabouh additive effects
+n=5; m=100_000; l=135_000_000; k=5; ϵ=Int(1e+15); a=2; vec_chr_lengths=[0]; vec_chr_names=[""]; dist_noLD=500_000; o=100; t=10; nQTL=5;
+heritability=0.5; LD_chr=""; LD_n_pairs=10_000
+epistasis = true
+@time vec_chr, vec_pos, X, y, b = SIMULATE(n, m, l, k, ϵ, a, vec_chr_lengths, vec_chr_names, dist_noLD, o, t, nQTL, heritability, LD_chr, LD_n_pairs, epistasis)
+y = (y .- minimum(y)) ./ (maximum(y) - minimum(y))
 
+
+function generate_W(X::Matrix{Int})::Matrix{Int}
+    step_bias = 0
+    window_size_sites = 75
+    n, m = size(X)
+    p = Int(ceil(m/window_size_sites))
+    W = ones(Int, n, 1)
+    for j in 0:(p-1)
+        # j = 0
+        ### Extrac the window
+        _ini_ = ((j+0)*window_size_sites) + 1 + step_bias
+        # _fin_ = ((j+1)*window_size_sites) + 0 + step_bias
+        _fin_ = _ini_ + (window_size_sites-1)
+        if _fin_ > m
+            _fin_ = m
+        end
+
+
+        x = X[:, _ini_:_fin_]
+        ### Find unique allele combinations in this window
+        w0 = []
+        for i in 1:n
+            push!(w0, join(x[i,:]))
+        end
+        w0_uniq = unique(w0)
+        q = length(w0_uniq)
+        q_collect_rev = reverse(collect(1:q))
+        #### Append the matrix of genotypes to the existing matrix of genotypes per window
+        W = hcat(W, zeros(Int, n, q))
+        for i in 1:n
+            # i = 1
+            idx = q_collect_rev[w0[i] .== w0_uniq][1] - 1 ### minus 1 for the intercept
+            W[i, end-idx] = 1
+        end
+    end
+    return W
+end
+
+W = generate_W(X)
+
+
+idx = sample(collect(1:o), o, replace=false)
+fold = 0
+idx_valid = idx[((10*fold)+1):(10*(fold+1))]
+idx_train = [!(x ∈ idx_valid) for x in idx]
+X_train = X[idx_train,:]
+X_valid = X[idx_valid,:]
+W_train = W[idx_train, :]
+
+y_train = y[idx_train]
+y_valid = y[idx_valid]
+W_valid = W[idx_valid, :]
+
+UnicodePlots.histogram(Float64.(y))
+UnicodePlots.histogram(Float64.(y_train))
+
+β̂_ols = X_train' * pinv(X_train * X_train') * y_train
+β̂_epi = W_train' * pinv(W_train * W_train') * y_train
+
+ŷ_valid_ols = X_valid * β̂_ols
+ŷ_valid_epi = W_valid * β̂_epi
+
+sqrt(mean((y_valid .- ŷ_valid_ols).^2))
+sqrt(mean((y_valid .- ŷ_valid_epi).^2))
